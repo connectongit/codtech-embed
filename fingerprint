@@ -1,0 +1,139 @@
+/*
+ * Project: Fingerprint Based Door Lock System
+ * Description: Biometric door access controller with auto-relock and failed-attempt alarm
+ * Hardware: Arduino Uno, R307/AS608 Fingerprint Sensor, SG90 Servo Motor, Green LED, Red LED, Buzzer
+ */
+
+#include <Adafruit_Fingerprint.h>
+#include <SoftwareSerial.h>
+#include <Servo.h>
+
+// SoftwareSerial pins for Fingerprint Sensor (Sensor TX -> Pin 2, Sensor RX -> Pin 3)
+SoftwareSerial fingerSerial(2, 3);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerSerial);
+
+// Actuator and Indicator Pins
+const int SERVO_PIN     = 9;
+const int GREEN_LED_PIN = 6;
+const int RED_LED_PIN   = 7;
+const int BUZZER_PIN    = 8;
+
+// Door Lock Servo Angles
+const int LOCKED_ANGLE   = 0;
+const int UNLOCKED_ANGLE = 90;
+
+Servo lockServo;
+int failedAttempts = 0;
+const int MAX_FAILED_ATTEMPTS = 3;
+
+void setup() {
+  Serial.begin(9600);
+  finger.begin(57600);
+
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  pinMode(RED_LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Initialize door in locked position
+  lockServo.attach(SERVO_PIN);
+  lockServo.write(LOCKED_ANGLE);
+  digitalWrite(RED_LED_PIN, HIGH);
+  digitalWrite(GREEN_LED_PIN, LOW);
+
+  delay(200);
+  Serial.println("Initializing Fingerprint Door Lock...");
+
+  if (finger.verifyPassword()) {
+    Serial.println("Fingerprint sensor detected and ready!");
+  } else {
+    Serial.println("ERROR: Fingerprint sensor not found. Check wiring.");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  finger.getTemplateCount();
+  Serial.print("Enrolled fingerprints in database: ");
+  Serial.println(finger.templateCount);
+  Serial.println("Place your finger on the sensor...");
+}
+
+void loop() {
+  int result = checkFingerprint();
+
+  if (result >= 0) {
+    // Valid fingerprint matched
+    grantAccess(result);
+  } else if (result == -2) {
+    // Unrecognized fingerprint detected
+    denyAccess();
+  }
+
+  delay(100);
+}
+
+// Scans and matches fingerprint; returns ID (>=0), -1 if no finger, -2 if unauthorized
+int checkFingerprint() {
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) return -1; // No finger placed
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.fingerFastSearch();
+  if (p == FINGERPRINT_OK) {
+    return finger.fingerID; // Authorized ID found
+  } else if (p == FINGERPRINT_NOTFOUND) {
+    return -2; // Unauthorized finger
+  }
+  return -1;
+}
+
+// Unlocks the door for 5 seconds and automatically re-locks
+void grantAccess(int id) {
+  failedAttempts = 0;
+  Serial.print("ACCESS GRANTED! Welcome User ID #");
+  Serial.print(id);
+  Serial.print(" (Confidence: ");
+  Serial.print(finger.confidence);
+  Serial.println(")");
+
+  digitalWrite(RED_LED_PIN, LOW);
+  digitalWrite(GREEN_LED_PIN, HIGH);
+  tone(BUZZER_PIN, 2000, 150);
+
+  lockServo.write(UNLOCKED_ANGLE);
+  delay(5000); // Keep door unlocked for 5 seconds
+
+  // Re-lock door
+  lockServo.write(LOCKED_ANGLE);
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, HIGH);
+  Serial.println("Door Locked Automatically.");
+}
+
+// Denies access and triggers security alarm after 3 failed attempts
+void denyAccess() {
+  failedAttempts++;
+  Serial.print("ACCESS DENIED! Failed Attempt ");
+  Serial.print(failedAttempts);
+  Serial.print("/");
+  Serial.println(MAX_FAILED_ATTEMPTS);
+
+  for (int i = 0; i < 2; i++) {
+    digitalWrite(RED_LED_PIN, LOW);
+    tone(BUZZER_PIN, 500, 200);
+    delay(250);
+    digitalWrite(RED_LED_PIN, HIGH);
+    delay(250);
+  }
+
+  if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+    Serial.println("SECURITY ALERT: Multiple unauthorized attempts detected!");
+    for (int i = 0; i < 5; i++) {
+      tone(BUZZER_PIN, 1000, 400);
+      delay(500);
+    }
+    failedAttempts = 0;
+  }
+}
