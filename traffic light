@@ -1,0 +1,103 @@
+/*
+ * Project: Smart Traffic Light Controller
+ * Description: Density-based 2-way traffic control using Ultrasonic Sensors (HC-SR04)
+ * Hardware: Arduino Uno, 2x HC-SR04 Ultrasonic Sensors, 6x LEDs (2 Red, 2 Yellow, 2 Green), 6x 220-ohm Resistors
+ */
+
+// Lane 1 LED Pins
+const int L1_RED    = 2;
+const int L1_YELLOW = 3;
+const int L1_GREEN  = 4;
+
+// Lane 2 LED Pins
+const int L2_RED    = 5;
+const int L2_YELLOW = 6;
+const int L2_GREEN  = 7;
+
+// Ultrasonic Sensor Pins
+const int TRIG_1 = 8;
+const int ECHO_1 = 9;
+const int TRIG_2 = 10;
+const int ECHO_2 = 11;
+
+// Timing & Threshold Constants
+const int TRAFFIC_THRESHOLD_CM = 30;   // Vehicle detected within 30 cm
+const unsigned long BASE_GREEN_TIME     = 5000;  // 5 seconds default green
+const unsigned long EXTENDED_GREEN_TIME = 10000; // 10 seconds heavy traffic green
+const unsigned long YELLOW_TIME         = 2000;  // 2 seconds transition
+
+// Function to measure distance in centimeters using HC-SR04
+long getDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000); // 30ms timeout
+  if (duration == 0) return 999;                 // No echo received
+  return duration * 0.034 / 2;
+}
+
+// Helper function to set LED states for both lanes
+void setLights(int l1R, int l1Y, int l1G, int l2R, int l2Y, int l2G) {
+  digitalWrite(L1_RED, l1R);
+  digitalWrite(L1_YELLOW, l1Y);
+  digitalWrite(L1_GREEN, l1G);
+
+  digitalWrite(L2_RED, l2R);
+  digitalWrite(L2_YELLOW, l2Y);
+  digitalWrite(L2_GREEN, l2G);
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  // Configure LED pins as outputs
+  int ledPins[] = {L1_RED, L1_YELLOW, L1_GREEN, L2_RED, L2_YELLOW, L2_GREEN};
+  for (int i = 0; i < 6; i++) {
+    pinMode(ledPins[i], OUTPUT);
+  }
+
+  // Configure Ultrasonic sensor pins
+  pinMode(TRIG_1, OUTPUT);
+  pinMode(ECHO_1, INPUT);
+  pinMode(TRIG_2, OUTPUT);
+  pinMode(ECHO_2, INPUT);
+
+  Serial.println("Smart Traffic Light Controller Initialized...");
+}
+
+void loop() {
+  // --- PHASE 1: Evaluate Lane 1 Traffic ---
+  long dist1 = getDistance(TRIG_1, ECHO_1);
+  bool heavyLane1 = (dist1 < TRAFFIC_THRESHOLD_CM);
+  unsigned long l1Duration = heavyLane1 ? EXTENDED_GREEN_TIME : BASE_GREEN_TIME;
+
+  Serial.print("Lane 1 Distance: "); Serial.print(dist1); Serial.print(" cm | ");
+  Serial.println(heavyLane1 ? "Heavy Traffic -> Extended Green (10s)" : "Normal Traffic -> Standard Green (5s)");
+
+  // Lane 1 GREEN, Lane 2 RED
+  setLights(LOW, LOW, HIGH, HIGH, LOW, LOW);
+  delay(l1Duration);
+
+  // Lane 1 YELLOW, Lane 2 RED
+  setLights(LOW, HIGH, LOW, HIGH, LOW, LOW);
+  delay(YELLOW_TIME);
+
+  // --- PHASE 2: Evaluate Lane 2 Traffic ---
+  long dist2 = getDistance(TRIG_2, ECHO_2);
+  bool heavyLane2 = (dist2 < TRAFFIC_THRESHOLD_CM);
+  unsigned long l2Duration = heavyLane2 ? EXTENDED_GREEN_TIME : BASE_GREEN_TIME;
+
+  Serial.print("Lane 2 Distance: "); Serial.print(dist2); Serial.print(" cm | ");
+  Serial.println(heavyLane2 ? "Heavy Traffic -> Extended Green (10s)" : "Normal Traffic -> Standard Green (5s)");
+
+  // Lane 1 RED, Lane 2 GREEN
+  setLights(HIGH, LOW, LOW, LOW, LOW, HIGH);
+  delay(l2Duration);
+
+  // Lane 1 RED, Lane 2 YELLOW
+  setLights(HIGH, LOW, LOW, LOW, HIGH, LOW);
+  delay(YELLOW_TIME);
+}
